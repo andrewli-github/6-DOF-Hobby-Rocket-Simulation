@@ -1,0 +1,71 @@
+# Andrew Li
+# 6/31/2026
+### Simulating projectile motion with flat earth assumption
+
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.integrate as sci
+
+# Equations of motion for projectile motion 
+# F = m*z''  
+
+# Constant parameters
+mass = 1.0 #kg
+
+# Differential equations
+def Derivatives(state, t):
+    global mass
+    # state vector
+    z = state[0]  # position
+    velz = state[1]  # velocity
+
+    # Kinematic relationship
+    z_dot = velz
+
+    # Total Force
+    # Gravity
+    force_gravity = -9.81*mass
+
+    # Aerodynamic drag
+    force_drag = 0.0
+
+    # Thrust force
+    force_thrust = 0.0
+
+    Total_Force = force_gravity + force_drag + force_thrust
+
+    # Acceleration
+    z_ddot = Total_Force/mass
+
+    # Compute z' 
+    state_dot = np.asarray([z_dot, z_ddot])
+    return state_dot
+
+# Initial conditions
+z_int = 0.0
+velz_int = 150 #m/s
+state_int = np.asarray([z_int, velz_int])
+
+# Time window
+tspan = np.linspace(0, 35, 1000)
+
+# Integration call
+state_out = sci.odeint(Derivatives, state_int, tspan)
+
+# outputs
+z_out = state_out[:,0]
+velz_out = state_out[:,1]
+
+# Plot Altidude
+plt.plot(tspan, z_out)
+plt.xlabel('Time (s)')
+plt.ylabel('Altitude (m)')
+plt.grid(True)
+plt.show()
+
+# PLot Velocity
+plt.plot(tspan, velz_out)
+plt.xlabel('Time (s)')
+plt.ylabel('Speed (m/s)')
+plt.grid(True)
+plt.show()
