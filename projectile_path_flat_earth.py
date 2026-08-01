@@ -6,13 +6,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.integrate as sci
 
-# Equations of motion for projectile motion 
-# F = m*z''  
-
 # Constant parameters
 mass = 1.0 #kg
 
-# Differential equations
+### Differential equations
 def Derivatives(state, t):
     global mass
     # state vector
