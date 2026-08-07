@@ -1,6 +1,8 @@
 # Andrew Li
-# 6/31/2026
+# 7/31/2026
 ### Simulating projectile motion with 2D newtonian gravity
+
+from time import time
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -63,21 +65,50 @@ class Aero():
 class AirBrake():
     def __init__(self, rocket):
         self.rocket = rocket
-        self.brake_area = 0.0 # m^2
+        self.brake_area = 5.0 # m^2
         self.total_area = rocket.cross_section + self.brake_area
 
-    def set_brake_area(self, time, altitude):
-        if (time < self.rocket.t_MECO):
-            self.brake_area = 0.0
-        else:
-            if altitude < 800.0:  
-                self.brake_area = 0.0 
-            
-            else:
-                self.brake_area = 0.5
-                
-        self.total_area = self.rocket.cross_section + self.brake_area
+    def set_brake_area(self, percent):
+        self.calculate_brake_area = self.brake_area * percent
+        self.total_area = self.rocket.cross_section + self.calculate_brake_area
+        return self.total_area
 
+class AltitudeController():
+    def __init__(self, target_altitude, planet):
+        self.target_altitude = target_altitude
+        self.planet = planet
+        self.Kp = 1/800
+
+    def predict_altitude(self, state):
+        current_position = np.asarray([state[0], state[1]])
+        velocity = np.asarray([state[2], state[3]])
+        rad_vel_dir = current_position / np.linalg.norm(current_position)
+        rad_vel = np.dot(velocity, rad_vel_dir)
+        rad_vel = max(rad_vel, 0.0)  # Ensure non-negative radial velocity
+
+        gravity = self.planet.gravity(state[0], state[1])[0]
+
+        predicted_altitude = self.planet.altitude(state[0], state[1]) + rad_vel**2 / (2 * np.linalg.norm(gravity))
+        return predicted_altitude
+
+    def find_error(self, state):
+        error = self.predict_altitude(state) - self.target_altitude
+        return error
+    
+    def control_airbrake(self, state, time, t_MECO):
+        if time < t_MECO:
+            return 0.0  # No braking during powered flight
+        else:
+            overshoot = self.find_error(state)
+            if overshoot < 0.0: #undershoot
+                return 0.0
+            else: #overshoot
+                if overshoot < 10.0: # deadband
+                    return 0.0
+                else:
+                    brake_percent = np.clip(overshoot*self.Kp, 0.0, 1.0)
+            return brake_percent
+                
 # Create aerodynamic model
 aero_model = Aero()
 
@@ -88,13 +119,16 @@ planet_model = Planet()
 rocket_1 = Rocket(mass=500.0, max_thrust=10000.0, Isp=220.0, cross_section=1.0, t_MECO = 15.5,drag_coefficient=0.4)
 
 air_brake = AirBrake(rocket_1)
+
+altitude_controller = AltitudeController(target_altitude=1650.0, planet=planet_model)
     
 class Simulation():
-    def __init__(self, rocket, planet, aero, air_brake):
+    def __init__(self, rocket, planet, aero, air_brake, altitude_controller):
         self.rocket = rocket
         self.planet = planet
         self.aero = aero
         self.air_brake = air_brake
+        self.altitude_controller = altitude_controller
 
     ### Differential equations
     def derivatives(self, state, t):
@@ -117,12 +151,15 @@ class Simulation():
 
         # Aerodynamic drag
         altitude = self.planet.altitude(x, z)
-        self.air_brake.set_brake_area(t, altitude)
         air_density = self.aero.getDensity(altitude)
         v_mag = np.sqrt(velx**2 + velz**2) # Calculate velocity magnitude
+
+        # Find brake area
+        brake_area_percent = self.altitude_controller.control_airbrake(state, t, self.rocket.t_MECO)
+        total_area = self.air_brake.set_brake_area(brake_area_percent)
         
         # Apply F_drag = -0.5 * rho * Cd * A * |v| * v_vector
-        force_drag = -0.5 * air_density * self.rocket.drag_coefficient * self.air_brake.total_area * v_mag * np.asarray([velx, velz])
+        force_drag = -0.5 * air_density * self.rocket.drag_coefficient * total_area * v_mag * np.asarray([velx, velz])
 
         # Thrust force
         force_thrust, m_dot = self.rocket.propulsion(t)
@@ -137,24 +174,22 @@ class Simulation():
             m_dot = 0.0
 
         # Compute z' 
-        if self.ground_check(state):
+        if self.ground_check(state, t):
             state_dot = np.asarray([0.0, 0.0, 0.0, 0.0, 0.0])
         else:
             state_dot = np.asarray([x_dot, z_dot, ddot[0], ddot[1], m_dot])
         return state_dot
         
-    def ground_check(self, state):
-        x = state[0]
-        z = state[1]
-        altitude = self.planet.altitude(x, z)
-        if altitude < 0:
+    def ground_check(self, state, t):
+        if self.planet.altitude(state[0], state[1]) < 0.0 and t > 0.0:
             return True
-        else:
+        else:   
             return False
         
     def run(self, state_int, tspan):
         # Integration call
         self.tspan = tspan
+        
         self.state_out = sci.odeint(self.derivatives, state_int, tspan)
         return self.state_out
 
@@ -195,6 +230,10 @@ class PlotSimulation:
         plt.title("Rocket Altitude")
         plt.grid(True)
         plt.show()
+
+        # print max altitude
+        max_altitude = np.max(altitude)
+        print(f"Max Altitude: {max_altitude:.2f} m")
 
     def plot_velocity(self, state_out):
         velx_out = state_out[:, 2]
@@ -265,7 +304,7 @@ class PlotSimulation:
 tspan = np.linspace(0, period, 1000)
 
 # Integration call
-simulation = Simulation(rocket_1, planet_model, aero_model, air_brake)
+simulation = Simulation(rocket_1, planet_model, aero_model, air_brake, altitude_controller)
 state_out = simulation.run(state_int, tspan)
 
 plot = PlotSimulation(simulation)
